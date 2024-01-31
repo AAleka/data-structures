@@ -1,11 +1,9 @@
 #ifndef VECTOR_H
-
 #define VECTOR_H
 
 #include <functional>
 #include <mutex>
-#include <iostream>
-#include <cstring>
+#include <stdexcept>
 
 template <typename T>
 class Vector
@@ -22,19 +20,24 @@ public:
     std::function<T()>            pop;
     std::function<T(int)>         at;
     std::function<size_t()>       get_size;
-    std::function<int()>          get_length;
+    std::function<size_t()>       get_length;
     std::function<size_t()>       get_capacity;
+    std::function<int()>       get_increase;
 
 public:
     Vector(bool is_thread_safe);
     Vector(size_t capacity, bool is_thread_safe);
     Vector(size_t capacity, int increase, bool is_thread_safe);
+    ~Vector();
 
     const T& operator[](int index) const;
 
 private:
     void initialize_functions(bool is_thread_safe);
     void increase_capacity();
+
+    bool is_full();
+    bool is_empty();
 
     void thread_safe_push_back(const T& element);
     void no_thread_safe_push_back(const T& element);
@@ -48,11 +51,14 @@ private:
     size_t thread_safe_size();
     size_t no_thread_safe_size();
 
-    int thread_safe_length();
-    int no_thread_safe_length();
+    size_t thread_safe_length();
+    size_t no_thread_safe_length();
 
     size_t thread_safe_capacity();
     size_t no_thread_safe_capacity();
+
+    int thread_safe_increase();
+    int no_thread_safe_increase();
 };
 
 template <typename T>
@@ -74,6 +80,12 @@ Vector<T>::Vector(size_t capacity, int increase, bool is_thread_safe)
     : capacity(capacity), size(0), increase(increase), elements(new T[capacity])
 {
     initialize_functions(is_thread_safe);
+}
+
+template <typename T>
+Vector<T>::~Vector()
+{
+    delete[] elements;
 }
 
 template <typename T>
@@ -100,11 +112,23 @@ void Vector<T>::initialize_functions(bool is_thread_safe)
 }
 
 template <typename T>
+bool Vector<T>::is_full()
+{
+    return (size + 1 == capacity);
+}
+
+template <typename T>
+bool Vector<T>::is_empty()
+{
+    return (size == 0);
+}
+
+template <typename T>
 void Vector<T>::thread_safe_push_back(const T& element)
 {
     std::lock_guard<std::mutex> lock(mutex);
 
-    if (size + 1 == capacity)
+    if (is_full())
         increase_capacity();
 
     elements[size++] = element;
@@ -113,7 +137,7 @@ void Vector<T>::thread_safe_push_back(const T& element)
 template <typename T>
 void Vector<T>::no_thread_safe_push_back(const T& element)
 {
-    if (size + 1 == capacity)
+    if (is_full())
         increase_capacity();
 
     elements[size++] = element;
@@ -124,11 +148,12 @@ T Vector<T>::thread_safe_pop()
 {
     std::lock_guard<std::mutex> lock(mutex);
 
-    if (size == 0)
-        return T();
+    if (is_empty())
+        throw std::out_of_range("Index out of range");
 
-    T popped_element = elements[size - 1];
-    elements[size--] = T();
+    size--;
+    T popped_element = elements[size];
+    elements[size] = T();
 
     return popped_element;
 }
@@ -136,11 +161,12 @@ T Vector<T>::thread_safe_pop()
 template <typename T>
 T Vector<T>::no_thread_safe_pop()
 {
-    if (size == 0)
-        return T();
+    if (is_empty())
+        throw std::out_of_range("Index out of range");
 
-    T popped_element = elements[size - 1];
-    elements[size--] = T();
+    size--;
+    T popped_element = elements[size];
+    elements[size] = T();
 
     return popped_element;
 }
@@ -153,7 +179,7 @@ T Vector<T>::thread_safe_at(int index)
     if (index >= 0 && index < size)
         return elements[index];
     else
-        return T();
+        throw std::out_of_range("Index out of range");
 }
 
 template <typename T>
@@ -162,7 +188,7 @@ T Vector<T>::no_thread_safe_at(int index)
     if (index >= 0 && index < size)
         return elements[index];
     else
-        return T();
+        throw std::out_of_range("Index out of range");
 }
 
 template <typename T>
@@ -194,7 +220,7 @@ size_t Vector<T>::no_thread_safe_capacity()
 }
 
 template <typename T>
-int Vector<T>::thread_safe_length()
+size_t Vector<T>::thread_safe_length()
 {
     std::lock_guard<std::mutex> lock(mutex);
 
@@ -202,9 +228,23 @@ int Vector<T>::thread_safe_length()
 }
 
 template <typename T>
-int Vector<T>::no_thread_safe_length()
+size_t Vector<T>::no_thread_safe_length()
 {
     return size;
+}
+
+template <typename T>
+int Vector<T>::thread_safe_increase()
+{
+    std::lock_guard<std::mutex> lock(mutex);
+
+    return increase;
+}
+
+template <typename T>
+int Vector<T>::no_thread_safe_increase()
+{
+    return increase;
 }
 
 template <typename T>
@@ -213,7 +253,9 @@ void Vector<T>::increase_capacity()
     capacity += increase;
 
     T* buffer_elements = new T[capacity];
-    std::memcpy(buffer_elements, elements, size * sizeof(T));
+
+    for (size_t i = 0; i < size; ++i)
+        buffer_elements[i] = elements[i];
 
     delete[] elements;
 
@@ -223,7 +265,7 @@ void Vector<T>::increase_capacity()
 template <typename T>
 const T& Vector<T>::operator[](int index) const
 {
-    return elements[index];
+    return at(index);
 }
 
 #endif
